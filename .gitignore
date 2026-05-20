@@ -20,7 +20,7 @@ frontend/dist/
 frontend/.vite/
 
 # Data/outputs
-*.pth
+# *.pth
 *.pt
 *.h5
 *.ckpt
