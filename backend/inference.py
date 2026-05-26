@@ -7,22 +7,16 @@ from typing import List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
-# Normalization stats (ImageNet)
-IMAGENET_MEAN = [0.485, 0.456, 0.406]
-IMAGENET_STD = [0.229, 0.224, 0.225]
-
 TRANSFORMS = {
     "small": transforms.Compose([
         transforms.ToPILImage(),
         transforms.Resize((128, 128)),
         transforms.ToTensor(),
-        transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
     ]),
     "large": transforms.Compose([
         transforms.ToPILImage(),
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
-        transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
     ]),
 }
 
@@ -42,19 +36,17 @@ def extract_frames(video_path: str, max_frames: int = 20) -> List[np.ndarray]:
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    duration_s = total_frames / fps
+    duration_s = (total_frames / fps) if fps > 0 else 0
 
-    # Sample at most max_frames evenly across the video
-    n_samples = min(max_frames, max(1, int(duration_s)))
-    if n_samples < 1:
-        n_samples = 1
+    # Match training behavior: sample approximately 1 frame every second.
+    # Use integer-second timestamps and cap to max_frames.
+    second_marks = max(1, int(duration_s))
+    frame_indices = [int(i * fps) for i in range(second_marks)]
+    frame_indices = frame_indices[:max_frames]
 
-    # Compute frame indices to grab
-    if n_samples == 1:
+    # Fallback for very short/invalid metadata videos.
+    if not frame_indices:
         frame_indices = [0]
-    else:
-        step = total_frames / n_samples
-        frame_indices = [int(i * step) for i in range(n_samples)]
 
     frames: List[np.ndarray] = []
     for idx in frame_indices:
@@ -89,6 +81,7 @@ def run_inference(
     frames: List[np.ndarray],
     model_name: str,
     device: torch.device,
+    fake_index: int = 1,
     batch_size: int = 8,
 ) -> Dict[str, Any]:
     """
@@ -115,7 +108,7 @@ def run_inference(
             batch = torch.stack(tensors[i: i + batch_size]).to(device)
             logits = model(batch)
             probs = torch.softmax(logits, dim=1)
-            fake_probs = probs[:, 1].cpu().tolist()  # index 1 = FAKE
+            fake_probs = probs[:, fake_index].cpu().tolist()
             all_probs.extend(fake_probs)
 
     for frame_idx, fake_prob in enumerate(all_probs):

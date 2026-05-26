@@ -1,6 +1,7 @@
 import os
 import time
 import logging
+import json
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -40,11 +41,29 @@ MODEL_PATHS = {
 }
 
 loaded_models: dict = {}
+# ImageFolder sorts class folders alphabetically; with folders [fake, real], FAKE maps to index 0.
+CLASS_NAMES = ["fake", "real"]
+FAKE_CLASS_INDEX = 0
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Load all models at startup."""
+    global CLASS_NAMES, FAKE_CLASS_INDEX
+
+    classes_path = BASE_DIR / "classes.json"
+    if classes_path.exists():
+        try:
+            with open(classes_path, "r", encoding="utf-8") as f:
+                names = json.load(f)
+            if isinstance(names, list) and len(names) >= 2:
+                CLASS_NAMES = [str(x).lower() for x in names]
+                if "fake" in CLASS_NAMES:
+                    FAKE_CLASS_INDEX = CLASS_NAMES.index("fake")
+            logger.info("Loaded class names: %s (fake index=%d)", CLASS_NAMES, FAKE_CLASS_INDEX)
+        except Exception as exc:
+            logger.warning("Could not load classes.json, using fallback mapping: %s", exc)
+
     for name, path in MODEL_PATHS.items():
         try:
             logger.info("Loading model '%s' from %s", name, path)
@@ -110,6 +129,8 @@ async def health():
         "status": "ok",
         "device": str(DEVICE),
         "models_loaded": list(loaded_models.keys()),
+        "class_names": CLASS_NAMES,
+        "fake_class_index": FAKE_CLASS_INDEX,
     }
 
 
@@ -157,6 +178,7 @@ async def predict(
             frames=frames,
             model_name=model_key,
             device=DEVICE,
+            fake_index=FAKE_CLASS_INDEX,
             batch_size=8,
         )
 
